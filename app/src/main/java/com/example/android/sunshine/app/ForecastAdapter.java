@@ -15,10 +15,13 @@
  */
 package com.example.android.sunshine.app;
 
+import android.app.Activity;
 import android.content.Context;
 import android.database.Cursor;
 import android.os.Build;
 import android.os.Bundle;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.view.ViewCompat;
 import android.support.v7.widget.RecyclerView;
 import android.util.Log;
@@ -31,12 +34,19 @@ import android.widget.TextView;
 
 import com.bumptech.glide.Glide;
 import com.example.android.sunshine.app.data.WeatherContract;
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.wearable.DataApi;
+import com.google.android.gms.wearable.PutDataMapRequest;
+import com.google.android.gms.wearable.PutDataRequest;
+import com.google.android.gms.wearable.Wearable;
 
 /**
  * {@link ForecastAdapter} exposes a list of weather forecasts
  * from a {@link android.database.Cursor} to a {@link android.support.v7.widget.RecyclerView}.
  */
-public class ForecastAdapter extends RecyclerView.Adapter<ForecastAdapter.ForecastAdapterViewHolder> {
+public class ForecastAdapter extends RecyclerView.Adapter<ForecastAdapter.ForecastAdapterViewHolder> implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
 
     private static final int VIEW_TYPE_TODAY = 0;
     private static final int VIEW_TYPE_FUTURE_DAY = 1;
@@ -45,10 +55,48 @@ public class ForecastAdapter extends RecyclerView.Adapter<ForecastAdapter.Foreca
     private boolean mUseTodayLayout = true;
 
     private Cursor mCursor;
-    final private Context mContext;
+    final private Activity mContext;
     final private ForecastAdapterOnClickHandler mClickHandler;
     final private View mEmptyView;
     final private ItemChoiceManager mICM;
+
+    private GoogleApiClient googleApiClient;
+
+    @Override
+    public void onConnected(@Nullable Bundle bundle) {
+
+    }
+
+    @Override
+    public void onConnectionSuspended(int i) {
+
+    }
+
+    @Override
+    public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+
+    }
+
+    public void sendTodayData(String minTemp, String maxTemp) {
+        PutDataMapRequest mapRequest = PutDataMapRequest.create("/today");
+
+        mapRequest.getDataMap().putString("min-temp", minTemp);
+        mapRequest.getDataMap().putString("max-temp", maxTemp);
+
+        PutDataRequest request = mapRequest.asPutDataRequest();
+        Wearable.DataApi.putDataItem(googleApiClient, request)
+                .setResultCallback(new ResultCallback<DataApi.DataItemResult>() {
+                    @Override
+                    public void onResult(@NonNull DataApi.DataItemResult dataItemResult) {
+                        if (!dataItemResult.getStatus().isSuccess()) {
+
+                        }
+                        else {
+
+                        }
+                    }
+                });
+    }
 
     /**
      * Cache of the children views for a forecast list item.
@@ -67,6 +115,7 @@ public class ForecastAdapter extends RecyclerView.Adapter<ForecastAdapter.Foreca
             mDescriptionView = (TextView) view.findViewById(R.id.list_item_forecast_textview);
             mHighTempView = (TextView) view.findViewById(R.id.list_item_high_textview);
             mLowTempView = (TextView) view.findViewById(R.id.list_item_low_textview);
+
             view.setOnClickListener(this);
         }
 
@@ -84,12 +133,19 @@ public class ForecastAdapter extends RecyclerView.Adapter<ForecastAdapter.Foreca
         void onClick(Long date, ForecastAdapterViewHolder vh);
     }
 
-    public ForecastAdapter(Context context, ForecastAdapterOnClickHandler dh, View emptyView, int choiceMode) {
+    public ForecastAdapter(Activity context, ForecastAdapterOnClickHandler dh, View emptyView, int choiceMode) {
         mContext = context;
         mClickHandler = dh;
         mEmptyView = emptyView;
         mICM = new ItemChoiceManager(this);
         mICM.setChoiceMode(choiceMode);
+
+        googleApiClient = new GoogleApiClient.Builder(mContext)
+                .addApi(Wearable.API)
+                .addConnectionCallbacks(this)
+                .addOnConnectionFailedListener(this)
+                .build();
+        googleApiClient.connect();
     }
 
     /*
@@ -215,6 +271,15 @@ public class ForecastAdapter extends RecyclerView.Adapter<ForecastAdapter.Foreca
     public void swapCursor(Cursor newCursor) {
         mCursor = newCursor;
         notifyDataSetChanged();
+
+        mCursor.moveToFirst();
+        double minTemp = mCursor.getInt(ForecastFragment.COL_WEATHER_MIN_TEMP);
+        String minTempStr = Utility.formatTemperature(mContext, minTemp);
+        double maxTemp = mCursor.getInt(ForecastFragment.COL_WEATHER_MAX_TEMP);
+        String maxTempStr = Utility.formatTemperature(mContext, maxTemp);
+
+        sendTodayData(minTempStr, maxTempStr);
+
         mEmptyView.setVisibility(getItemCount() == 0 ? View.VISIBLE : View.GONE);
     }
 

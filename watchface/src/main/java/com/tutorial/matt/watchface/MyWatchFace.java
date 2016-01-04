@@ -31,12 +31,12 @@ import android.os.Handler;
 import android.os.Message;
 import android.support.wearable.watchface.CanvasWatchFaceService;
 import android.support.wearable.watchface.WatchFaceStyle;
-import android.text.format.Time;
 import android.view.SurfaceHolder;
 import android.view.WindowInsets;
 
 import java.lang.ref.WeakReference;
-import java.util.TimeZone;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -44,6 +44,8 @@ import java.util.concurrent.TimeUnit;
  * low-bit ambient mode, the text is drawn without anti-aliasing in ambient mode.
  */
 public class MyWatchFace extends CanvasWatchFaceService {
+    private static final String TAG = MyWatchFace.class.getSimpleName();
+
     private static final Typeface NORMAL_TYPEFACE =
             Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL);
 
@@ -86,15 +88,23 @@ public class MyWatchFace extends CanvasWatchFaceService {
     private class Engine extends CanvasWatchFaceService.Engine {
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         boolean mRegisteredTimeZoneReceiver = false;
+
         Paint mBackgroundPaint;
-        Paint mTextPaint;
+        Paint mLinePaint;
+
+        Paint mTimeTextPaint;
+        Paint mDateTextPaint;
+        Paint mHighTempTextPaint;
+        Paint mLowTempTextPaint;
+
+        String formattedMaxTemperature = "-";
+        String formattedMinTemperature = "-";
+
         boolean mAmbient;
-        Time mTime;
+
         final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-                mTime.clear(intent.getStringExtra("time-zone"));
-                mTime.setToNow();
             }
         };
         float mXOffset;
@@ -105,6 +115,8 @@ public class MyWatchFace extends CanvasWatchFaceService {
          * disable anti-aliasing in ambient mode.
          */
         boolean mLowBitAmbient;
+
+
 
         @Override
         public void onCreate(SurfaceHolder holder) {
@@ -119,12 +131,32 @@ public class MyWatchFace extends CanvasWatchFaceService {
             mYOffset = resources.getDimension(R.dimen.digital_y_offset);
 
             mBackgroundPaint = new Paint();
-            mBackgroundPaint.setColor(resources.getColor(R.color.background));
+            mBackgroundPaint.setColor(resources.getColor(R.color.background_color));
 
-            mTextPaint = new Paint();
-            mTextPaint = createTextPaint(resources.getColor(R.color.digital_text));
+            mLinePaint = new Paint();
+            mLinePaint.setColor(resources.getColor(R.color.secondary_color));
 
-            mTime = new Time();
+            mTimeTextPaint = new Paint();
+            mTimeTextPaint = createTextPaint(resources.getColor(R.color.primary_color));
+
+            mDateTextPaint = new Paint();
+            mDateTextPaint = createTextPaint(resources.getColor(R.color.secondary_color));
+
+            mHighTempTextPaint = new Paint();
+            mHighTempTextPaint = createTextPaint(resources.getColor(R.color.primary_color));
+
+            mLowTempTextPaint = new Paint();
+            mLowTempTextPaint = createTextPaint(resources.getColor(R.color.secondary_color));
+
+            IntentFilter filter = new IntentFilter();
+            filter.addAction("com.tutorial.matt.TODAY_DATA_RECEIVED");
+            MyWatchFace.this.registerReceiver(new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    formattedMinTemperature = intent.getStringExtra("min-temp");
+                    formattedMaxTemperature = intent.getStringExtra("max-temp");
+                }
+            }, filter);
         }
 
         @Override
@@ -147,10 +179,6 @@ public class MyWatchFace extends CanvasWatchFaceService {
 
             if (visible) {
                 registerReceiver();
-
-                // Update time zone in case it changed while we weren't visible.
-                mTime.clear(TimeZone.getDefault().getID());
-                mTime.setToNow();
             } else {
                 unregisterReceiver();
             }
@@ -186,10 +214,19 @@ public class MyWatchFace extends CanvasWatchFaceService {
             boolean isRound = insets.isRound();
             mXOffset = resources.getDimension(isRound
                     ? R.dimen.digital_x_offset_round : R.dimen.digital_x_offset);
-            float textSize = resources.getDimension(isRound
-                    ? R.dimen.digital_text_size_round : R.dimen.digital_text_size);
 
-            mTextPaint.setTextSize(textSize);
+            float timeTextSize = resources.getDimension(isRound
+                    ? R.dimen.time_text_size_round : R.dimen.time_text_size);
+            mTimeTextPaint.setTextSize(timeTextSize);
+
+            float dateTextSize = resources.getDimension(isRound
+                    ? R.dimen.date_text_size_round : R.dimen.date_text_size);
+            mDateTextPaint.setTextSize(dateTextSize);
+
+            float tempTextSize = resources.getDimension(isRound
+                    ? R.dimen.temp_text_size_round : R.dimen.temp_text_size);
+            mHighTempTextPaint.setTextSize(tempTextSize);
+            mLowTempTextPaint.setTextSize(tempTextSize);
         }
 
         @Override
@@ -210,7 +247,10 @@ public class MyWatchFace extends CanvasWatchFaceService {
             if (mAmbient != inAmbientMode) {
                 mAmbient = inAmbientMode;
                 if (mLowBitAmbient) {
-                    mTextPaint.setAntiAlias(!inAmbientMode);
+                    mTimeTextPaint.setAntiAlias(!inAmbientMode);
+                    mDateTextPaint.setAntiAlias(!inAmbientMode);
+                    mHighTempTextPaint.setAntiAlias(!inAmbientMode);
+                    mLowTempTextPaint.setAntiAlias(!inAmbientMode);
                 }
                 invalidate();
             }
@@ -229,12 +269,28 @@ public class MyWatchFace extends CanvasWatchFaceService {
                 canvas.drawRect(0, 0, bounds.width(), bounds.height(), mBackgroundPaint);
             }
 
-            // Draw H:MM in ambient mode or H:MM:SS in interactive mode.
-            mTime.setToNow();
-            String text = mAmbient
-                    ? String.format("%d:%02d", mTime.hour, mTime.minute)
-                    : String.format("%d:%02d:%02d", mTime.hour, mTime.minute, mTime.second);
-            canvas.drawText(text, mXOffset, mYOffset, mTextPaint);
+            Date date = new Date();
+
+            SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm");
+            String timeText = timeFormat.format(date);
+            float timeTextSize = mTimeTextPaint.measureText(timeText);
+            canvas.drawText(timeText, bounds.centerX() - (timeTextSize / 2), mYOffset, mTimeTextPaint);
+
+            SimpleDateFormat dateFormat = new SimpleDateFormat("E, MMM dd yyyy");
+            String dateText = dateFormat.format(date);
+            float dateTextSize = mDateTextPaint.measureText(dateText);
+            canvas.drawText(dateText, bounds.centerX() - (dateTextSize / 2), mYOffset + 30, mDateTextPaint);
+
+            float lineLength = 50;
+            canvas.drawLine(bounds.centerX() - (lineLength / 2), mYOffset + 50, bounds.centerX() + (lineLength / 2), mYOffset + 50, mLinePaint);
+
+            String highTempText = formattedMaxTemperature; //"\u00B0";
+            float highTempTextSize = mHighTempTextPaint.measureText(highTempText);
+            canvas.drawText(highTempText, bounds.centerX() - (highTempTextSize) - 10, mYOffset + 100, mHighTempTextPaint);
+
+            String lowTempText = formattedMinTemperature; //"28\u00B0";
+            float lowTempTextSize = mLowTempTextPaint.measureText(lowTempText);
+            canvas.drawText(lowTempText, bounds.centerX() + 10, mYOffset + 100, mLowTempTextPaint);
         }
 
         /**
